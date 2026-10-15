@@ -374,6 +374,8 @@ body{padding:var(--shell-gap);background:radial-gradient(ellipse at top,#48515e 
 @media(max-width:900px){:root{--shell-gap:10px}.brand-right{display:none}.brand-workspace{padding:10px}.app{border-radius:18px}.side{border-radius:0 16px 16px 0}.brand-left{width:160px}}
 @media(max-width:600px){:root{--shell-gap:6px}.app{border-radius:15px}.brand-workspace{padding:7px}.brand-views{border-radius:12px}.chat-panel-heading{padding:10px 12px}.chat-panel-heading .logo{width:32px;height:32px;font-size:18px}.chat-panel-heading div>span{font-size:10px}.chat-panel-heading b{font-size:13px}.brand-views .msgs{padding:16px 12px 8px}.brand-views .composer{padding:8px 10px 10px}}
 @media(max-height:700px){.brand-left{width:120px}.brand-right{gap:10px}.support-hero{min-height:205px}}
+
+.cite{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;vertical-align:baseline}.src{max-width:100%;white-space:normal;overflow-wrap:anywhere}.src b{white-space:normal}.secno{overflow-wrap:anywhere;max-width:100%}
 </style>
 </head>
 <body>
@@ -967,6 +969,21 @@ async function copyText(t){
 /* ---------- 간단 마크다운 렌더러 ---------- */
 const ID_PAT = "(?:연구\\d{3,4}|\\d-\\d{1,2}|부록|추가\\d+|매뉴얼[a-f0-9]{32}|원문[a-f0-9]{32}-[a-f0-9]{24})";
 const CITE_RE = new RegExp(`\\[(${ID_PAT}(?:\\s*[,·]\\s*${ID_PAT})*)\\]`, "g");
+function evidenceNames(sec){
+  if(!sec)return {document:'원문',item:'항목'};
+  const clean=value=>redactSecrets(String(value||'')).trim();
+  const strip=value=>value.replace(/\.(?:txt|docx|pdf|hwp|hwpx|xlsx?)$/i,'');
+  const rawDoc=clean(sec.sourceName|| (sec.research?'POUR공법 통합 지식베이스 v3':sec.managed?sec.category:sec.extra?'관리자 추가 지식':MAN[sec.m]) || '업무 매뉴얼');
+  const document=strip(rawDoc);
+  let item=clean(sec.title);
+  for(const prefix of [rawDoc,document])if(item.startsWith(prefix))item=item.slice(prefix.length).replace(/^\s*[·›:—-]\s*/,'').trim();
+  if(/^\d+$/.test(item))item='항목 '+item;
+  else if(!item)item='원문 내용';
+  item=item.replace(/^PART\s+\d+\.[^›]*›\s*/,'').replace(/\[\s*(\d+-\d+)\.\s*([^\]]+)\s*\]/g,'$2').trim();
+  return {document,item};
+}
+function evidenceLabel(sec){const n=evidenceNames(sec);return n.document+' · '+n.item;}
+
 function inline(s){
   s = esc(s);
   const codes = [];
@@ -977,7 +994,7 @@ function inline(s){
   s = s.replace(CITE_RE, (m, g) => {
     const ids = g.split(/\s*[,·]\s*/);
     if (!ids.every(id => SEC[id] && SEC[id].citable!==false)) return "";
-    return ids.map(id => `<button class="cite" data-sec="${id}" title="${esc(SEC[id].title)}">${id}</button>`).join("");
+    return ids.map(id => `<button class="cite" data-sec="${id}" title="${esc(evidenceLabel(SEC[id]))}">${esc(evidenceLabel(SEC[id]))}</button>`).join("");
   });
   s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => `<code>${codes[+i]}</code>`);
   return s;
@@ -1150,12 +1167,12 @@ function addBot(){
       const ids = citedIds(t);
       if (ids.length){
         const srcs = document.createElement("div"); srcs.className = "srcs";
-        srcs.innerHTML = `<span class="lbl">근거</span>` + ids.map(id => `<button class="src" data-sec="${id}"><b>${id}</b><span>${esc(SEC[id].title)}</span></button>`).join("");
+        srcs.innerHTML = `<span class="lbl">근거</span>` + ids.map(id => { const n=evidenceNames(SEC[id]);return `<button class="src" data-sec="${id}" title="${esc(evidenceLabel(SEC[id]))}"><b>${esc(n.document)}</b><span>${esc(n.item)}</span></button>`;}).join("");
         body.appendChild(srcs);
       }
       const tools = document.createElement("div"); tools.className = "tools";
       tools.innerHTML = `<button class="btn" data-act="copy"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>복사</button>`;
-      tools.querySelector('[data-act="copy"]').onclick = () => copyText(t.replace(CITE_RE, "[$1]"));
+      tools.querySelector('[data-act="copy"]').onclick = () => copyText(t.replace(CITE_RE, (match,group)=>group.split(/\s*[,·]\s*/).map(id=>SEC[id]?"["+evidenceLabel(SEC[id])+"]":match).join(" ")));
       if (q && !NOANS_RE.test(t)){
         const b = document.createElement("button"); b.className = "btn"; b.textContent = "답변이 부족해요";
         b.onclick = async () => { b.disabled = true; b.textContent = "기록했어요"; await logUnanswered(q, t, "manual"); };
@@ -1614,7 +1631,7 @@ function renderKb(q){
     if (q && !(s.id + " " + s.title + " " + (s.category || "") + " " + (s.description || "") + " " + s.body).toLowerCase().includes(q)) return;
     if (s.m !== last){ last = s.m; html += `<div class="kb-gh" id="kbm-${s.m}"><span class="no">${s.m === 6 ? "부록" : "매뉴얼 " + s.m}</span>${s.m === 6 ? esc(MAN[6] || "부록") : esc(MAN[s.m])}</div>`; }
     count++;
-    html += `<article class="kb-sec" ${s.managed ? "data-managed" : ""} data-id="${s.id}"><div class="kh"><b>${s.id}</b><h4>${esc(s.title)}</h4>${s.managed ? `<button class="ask" data-sec="${s.id}">내용 보기</button><button class="ask" data-editmanual="${s.key}">수정</button><button class="ask" data-delmanual="${s.key}">삭제</button>` : ""}${s.extra ? `<button class="ask" data-delextra="${esc(s.key)}" title="이 내용 삭제">삭제</button>` : ""}<button class="ask" data-ask="${s.id}" title="이 내용으로 질문하기">질문하기</button></div>${s.managed ? `<div class="logm">분류: ${esc(s.category)}${s.description ? " · " + esc(s.description) : ""}</div>` : ""}<div class="md">${s.citable===false?'<div class="help">문서·운영 안내 — 기술 답변의 근거에서 제외됩니다.</div>':""}${md(s.body)}</div>${s.extra && s.local ? '<div class="logm">내 브라우저에만 저장된 내용이에요</div>' : ""}</article>`;
+    html += `<article class="kb-sec" ${s.managed ? "data-managed" : ""} data-id="${s.id}"><div class="kh"><b>${esc(evidenceNames(s).document)}</b><h4>${esc(evidenceNames(s).item)}</h4>${s.managed ? `<button class="ask" data-sec="${s.id}">내용 보기</button><button class="ask" data-editmanual="${s.key}">수정</button><button class="ask" data-delmanual="${s.key}">삭제</button>` : ""}${s.extra ? `<button class="ask" data-delextra="${esc(s.key)}" title="이 내용 삭제">삭제</button>` : ""}<button class="ask" data-ask="${s.id}" title="이 내용으로 질문하기">질문하기</button></div>${s.managed ? `<div class="logm">분류: ${esc(s.category)}${s.description ? " · " + esc(s.description) : ""}</div>` : ""}<div class="md">${s.citable===false?'<div class="help">문서·운영 안내 — 기술 답변의 근거에서 제외됩니다.</div>':""}${md(s.body)}</div>${s.extra && s.local ? '<div class="logm">내 브라우저에만 저장된 내용이에요</div>' : ""}</article>`;
   });
   kbList.scrollTop = 0;
   html += `<div class="lib-addbox" style="padding:4px 0 20px">
@@ -1657,7 +1674,7 @@ function showSection(id){
   const sec = SEC[id]; if (!sec) return;
   secCur = sec;
   $("#secOpen").hidden = !!sec.source;
-  $("#secTitle").innerHTML = `<span class="secno">${esc(sec.id)}</span> ${esc(redactSecrets(sec.title))}`;
+  $("#secTitle").innerHTML = `<span class="secno">${esc(evidenceNames(sec).document)}</span> ${esc(evidenceNames(sec).item)}`;
   $("#secBody").innerHTML = (sec.citable===false?'<div class="setup">이 항목은 문서·챗봇 운영 안내입니다. 시공 방법 등 기술 답변의 근거로 사용하지 않습니다.</div>':"") + md(sec.body);
   if (typeof secDlg.showModal === "function") secDlg.showModal(); else secDlg.setAttribute("open", "");
 }
@@ -2089,7 +2106,7 @@ function renderSources(){
     if(q&&!sections.length&&!meta.toLowerCase().includes(q))continue;
     html+=`<article class="kb-sec source-card"><div class="kh"><h4>${esc(redactSecrets(g.name))}</h4>${g.editable?`<button class="ask" data-source-view="${g.id}">내용 보기</button><button class="ask" data-source-edit="${g.id}">수정</button><button class="ask" data-source-delete="${g.id}">삭제</button>`:''}</div><div class="logm">${esc(redactSecrets(g.category))}${g.description?' · '+esc(redactSecrets(g.description)):''} · AI 사용 ${g.sections.length}개 항목${g.editable&&g.total>g.sections.length?' · 중복 '+(g.total-g.sections.length)+'개 제외':''}</div>`;
     if(g.file)html+=`<div class="logm">${esc(g.file.name||'DOCX')} · 원본 파일은 등록한 브라우저에 보관</div>`;
-    html+=`<details${q?' open':''}><summary>답변에 사용하는 원문 항목 보기</summary>${sections.map(s=>`<div style="padding:6px 0"><button class="btn ghost" style="white-space:normal;text-align:left" data-sec="${s.id}">${esc(s.title)}</button><span class="logm" style="overflow-wrap:anywhere">[${s.id}]</span>${q?`<div class="md">${md(s.body)}</div>`:''}</div>`).join('')||'<div class="help">기존 지식과 중복되어 AI 검색에 다시 넣지 않았어요.</div>'}</details></article>`;
+    html+=`<details${q?' open':''}><summary>답변에 사용하는 원문 항목 보기</summary>${sections.map(s=>`<div style="padding:6px 0"><button class="btn ghost" style="white-space:normal;text-align:left" data-sec="${s.id}">${esc(s.title)}</button><span class="logm" style="overflow-wrap:anywhere">${esc(evidenceNames(s).item)}</span>${q?`<div class="md">${md(s.body)}</div>`:''}</div>`).join('')||'<div class="help">기존 지식과 중복되어 AI 검색에 다시 넣지 않았어요.</div>'}</details></article>`;
   }
   root.innerHTML=html||'<div class="kb-empty">검색한 원문이 없어요.</div>';
 }
